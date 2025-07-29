@@ -8,6 +8,15 @@ declare_id!("FqzkXZdwYjurnUKetJCAvaUw5WAqbwzU6gZEwydeEfqS");
 #[program]
 pub mod vesting {
    pub fn create_vesting_account(ctx:Context<CreateVestingAccount> , company_name:String) -> Result<()> {
+    
+    *ctx.accounts.vesting_account = VestingAccount{
+        owner: ctx.accounts.signer.key(),
+        mint: ctx.accounts.mint.key(),
+        treasury_token_account:ctx.accounts.treasury_token_account.key(),
+        company_name,
+        treasury_bump:ctx.bumps.treasury_token_account,
+        bump:ctx.bumps.vesting_account,
+    };
       Ok(())
    }
 }
@@ -42,10 +51,9 @@ pub struct CreateVestingAccount<'info> {
     pub system_program: Program<'info , System>,
     pub token_program: Interface<'info , TokenInterface>,
 
-
+}
 #[account]
 #[derive(InitSpace)]
-
 pub struct VestingAccount {
     pub owner: Pubkey,
     pub mint: Pubkey,
@@ -54,4 +62,15 @@ pub struct VestingAccount {
     pub company_name: String,
     pub treasury_bump: u8,
     pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct EmployeeAccount {
+    pub start_time : i64,
+    pub end_time : i64,
+    pub cliff_time : i64,
+    pub vesting_account : Pubkey,
+    pub total_amount : u64,
+    pub total_withdraw : u64,
 }
