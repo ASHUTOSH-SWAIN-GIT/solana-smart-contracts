@@ -1,7 +1,7 @@
 #![allow(clippy::result_large_err)]
 
 use anchor_lang::prelude::*;
-use anchor_spl::{token::TokenAccount, token_interface::TokenInterface};
+use anchor_spl::{associated_token::AssociatedToken, token::TokenAccount, token_interface::TokenInterface};
 
 declare_id!("FqzkXZdwYjurnUKetJCAvaUw5WAqbwzU6gZEwydeEfqS");
 
@@ -19,7 +19,31 @@ pub mod vesting {
     };
       Ok(())
    }
+
+
+   pub fn create_employee_account(
+    ctx:Context<CreateEmployeeAccount>,
+    start_time:i64,
+    end_time:i64,
+    total_amount:u64,
+    cliff_time:i64,
+) -> Result<()> {
+    *ctx.accounts.employee_account = EmployeeAccount{
+        benefiary:ctx.accounts.benefiary.key(),
+        start_time,
+        end_time,
+        cliff_time,
+        total_amount,
+        total_withdrawn:0,
+        vesting_account:ctx.accounts.vesting_account.key(),
+        bump:ctx.bumps.employee_account,
+    };
+    Ok(())
 }
+}
+
+
+
 
 #[derive(Accounts)]
 #[instruction(company_name:String)]
@@ -32,7 +56,7 @@ pub struct CreateVestingAccount<'info> {
         space = 8 + INIT_SPACE,
         payer = signer,
         seeds = [company_name.as_ref()],
-         bump 
+        bump 
     )]
     pub vesting_account: Account<'info, VestingAccount>,
     pub mint: InterfaceAccount<'info , Mint>,
@@ -50,8 +74,70 @@ pub struct CreateVestingAccount<'info> {
 
     pub system_program: Program<'info , System>,
     pub token_program: Interface<'info , TokenInterface>,
-
 }
+
+#[derive(Accounts)]
+pub struct CreateEmployeeAccount { 
+    #[account(mut)]
+    pub owner : Signer<'info>,
+    pub benefiary : SystemAccount<'info>,
+    #[account(
+        has_one = owner,
+    )]
+    pub vesting_account : Account<'info , VestingAccount>,
+    #[account(
+        init,
+        space = 8 + INIT_SPACE,
+        payer = owner,
+        seeds = [b"employee_vesting" , beneficiary.key().as_ref(), vesting_account.key().as_ref()],
+        bump,
+    )]
+
+    pub employee_account : Account<'info , EmployeeAccount>,
+    pub system_program : Program<'info ,System>,
+}
+
+#[derive(Accounts)]
+#[instructions(company_name:string)]
+pub struct ClaimTokens<'info>{
+    #[account(mut)]
+    pub beneficiary : Signer<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"employee_vesting" , beneficiary.key().as_ref(), vesting_account.key().as_ref()],
+        bump = employee_account.bump,
+        has_one = beneficiary,
+        has_one = vesting_account,
+    )]
+    pub employee_account: Account<'info,EmployeeAccount>,
+
+    #[account(
+        mut,
+        seeds = [company_name.as_ref()],
+        bump = vesting_account.bump,
+        has_one = treasury_token_account,
+        has_one = mint,
+    )]
+    pub vesting_account:Account<'info,VestingAccount>,
+    pub mint:InterfaceAccount<'info , Mint>,
+
+    #[account(mut)]
+    pub treasury_token_account : InterfaceAccount<'info , TokenAccount>,
+
+    #[account(
+        init_if_needed,
+        payer = beneficiary,
+        associated_token::mint = mint,
+        associated_token::authority = beneficiary,
+        associated_token::token_program = token_program,
+    )] 
+    pub employee_token_account : InterfaceAccount<'info , TokenAccount>,
+    pub token_program : Program<'info , TokenInterface>,
+    pub associated_token_program : Program<'info , AssociatedToken>,
+    pub system_program : Program<'info , Program>
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct VestingAccount {
@@ -66,11 +152,13 @@ pub struct VestingAccount {
 
 #[account]
 #[derive(InitSpace)]
-pub struct EmployeeAccount {
+pub struct EmployeeAccount {        
+
     pub start_time : i64,
     pub end_time : i64,
     pub cliff_time : i64,
     pub vesting_account : Pubkey,
     pub total_amount : u64,
-    pub total_withdraw : u64,
+    pub total_withdrawn: u64,
+    pub bump : u8,
 }
