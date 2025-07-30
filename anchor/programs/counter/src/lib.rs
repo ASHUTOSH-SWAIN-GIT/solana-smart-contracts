@@ -7,6 +7,12 @@ declare_id!("FqzkXZdwYjurnUKetJCAvaUw5WAqbwzU6gZEwydeEfqS");
 
 #[program]
 pub mod vesting {
+    use std::iter::Product;
+
+    use anchor_spl::token::TransferChecked;
+
+    use crate::EmployeeAccount;
+
    pub fn create_vesting_account(ctx:Context<CreateVestingAccount> , company_name:String) -> Result<()> {
     
     *ctx.accounts.vesting_account = VestingAccount{
@@ -21,25 +27,73 @@ pub mod vesting {
    }
 
 
-   pub fn create_employee_account(
-    ctx:Context<CreateEmployeeAccount>,
-    start_time:i64,
-    end_time:i64,
-    total_amount:u64,
-    cliff_time:i64,
-) -> Result<()> {
-    *ctx.accounts.employee_account = EmployeeAccount{
-        benefiary:ctx.accounts.benefiary.key(),
-        start_time,
-        end_time,
-        cliff_time,
-        total_amount,
-        total_withdrawn:0,
-        vesting_account:ctx.accounts.vesting_account.key(),
-        bump:ctx.bumps.employee_account,
-    };
-    Ok(())
-}
+    pub fn create_employee_account(
+        ctx:Context<CreateEmployeeAccount>,
+        start_time:i64,
+        end_time:i64,
+        total_amount:u64,
+        cliff_time:i64,
+        ) -> Result<()> {
+        *ctx.accounts.employee_account = EmployeeAccount{
+            beneficiary:ctx.accounts.beneficiary.key(),
+            start_time,
+            end_time,
+            cliff_time,
+            total_amount,
+            total_withdrawn:0,
+            vesting_account:ctx.accounts.vesting_account.key(),
+            bump:ctx.bumps.employee_account,
+
+        };
+        Ok(())
+    }
+
+
+    pub fn claim_tokens(ctx:Context<ClaimTokens> , company_name:String) -> Result<()> {
+        let employee_account = &mut ctx.accounts.employee_account;
+        let now = Clock::get()?.unix_timestamp;
+
+        if now < employee_account.cliff_time {
+            return Err(ErrorCode :: ClaimNotAvailableYet.into());
+        }
+
+        let time_since_start = now.saturating_sub(employee_account.start_time);
+        let total_vesting_time = employee_account.end_time.saturating_sub(employee_account.start_time);
+
+
+        if total_vesting_time == 0 {
+            return Err(ErrorCode :: NothingToClaim.into());
+        }
+ 
+        let vested_amount = if now >= employee_account.end_time{
+            employee_account.total_amount
+        } else {
+            match employee_account.total_amount.checked_mul(time_since_start as u64){
+                Some(product) => (
+                    product/total_vesting_time as u64
+                ),
+                None => {
+                    return Err(ErrorCode::CalculationOverflow.into())
+                }
+            }
+        };
+
+        let claimable_amount = vested_amount.saturating_sub(employee_account.total_withdrawn);
+        if claimable_amount== 0 {
+            return Err(ErrorCode::NothingToClaim.into())
+        }
+
+
+        let transfer_cpi_accounts = TransferChecked{
+            from:ctx.accounts.treasury_token_account.to_account_info,
+            mint:ctx.accounts.mint.to_account_info(),
+            to:ctx.accounts.employee_token_account.to_account_info,
+            authority:ctx.accounts.treasury_token_account.to_account_info(),
+        };
+
+        Ok(())
+
+    }
 }
 
 
@@ -161,4 +215,16 @@ pub struct EmployeeAccount {
     pub total_amount : u64,
     pub total_withdrawn: u64,
     pub bump : u8,
+    pub beneficiary:Pubkey,
+}
+
+pub enum ErrorCode {
+    #[msg("Claiming is not available yet.")]
+    ClaimNotAvailableYet,
+    #[msg("There is nothing to claim.")]
+    NothingToClaim,
+    #[msg("calculation overflow")]
+    CalculationOverflow,
+    #[msg("Nothing to claim")]
+    NothingToClaim
 }
